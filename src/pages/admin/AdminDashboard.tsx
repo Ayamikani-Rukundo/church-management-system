@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { Gallery, Users, Bell, Book } from 'lucide-react';
+import { Image as Gallery, Users, Bell, Book } from 'lucide-react';
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
