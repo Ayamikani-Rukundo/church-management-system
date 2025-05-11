@@ -1,7 +1,7 @@
 import express from 'express';
 import Gallery from '../models/Gallery.js';
 import auth from '../middleware/auth.js';
-import upload from '../middleware/upload.js';
+import { uploadSingle } from '../middleware/upload.js'; // Import the specific upload function
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -9,7 +9,6 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '../uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
@@ -24,7 +23,11 @@ router.get('/', async (req, res) => {
     res.json(galleryItems);
   } catch (error) {
     console.error('Error getting gallery items:', error);
-    res.status(500).json({ message: 'Failed to fetch gallery items' });
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to fetch gallery items',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
@@ -33,23 +36,36 @@ router.get('/:id', async (req, res) => {
   try {
     const galleryItem = await Gallery.findById(req.params.id);
     if (!galleryItem) {
-      return res.status(404).json({ message: 'Gallery item not found' });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Gallery item not found' 
+      });
     }
-    res.json(galleryItem);
+    res.json({
+      success: true,
+      data: galleryItem
+    });
   } catch (error) {
     console.error('Error getting gallery item:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
-// Create gallery item (with file upload)
-router.post('/', auth, upload.single('image'), async (req, res) => {
+// Create gallery item
+router.post('/', auth, uploadSingle, async (req, res) => {
   try {
     const { title, description } = req.body;
     
     if (!title || !description || !req.file) {
+      if (req.file) {
+        fs.unlinkSync(req.file.path);
+      }
       return res.status(400).json({ 
-        message: 'Title, description and image are required' 
+        message: 'Title, description, and image are required' 
       });
     }
 
@@ -62,41 +78,58 @@ router.post('/', auth, upload.single('image'), async (req, res) => {
     await newItem.save();
     res.status(201).json(newItem);
   } catch (error) {
-    console.error('Create error:', error);
-    
-    // Clean up uploaded file if saving to DB failed
+    console.error('Error creating gallery item:', error);
     if (req.file) {
-      fs.unlink(path.join(uploadsDir, req.file.filename), () => {});
+      fs.unlinkSync(req.file.path);
     }
-    
-    res.status(400).json({ 
-      message: error.message || 'Failed to create gallery item' 
-    });
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
+      
 // Update gallery item (with optional file upload)
-router.put('/:id', auth, upload.single('image'), async (req, res) => {
+router.put('/:id', auth, uploadSingle, async (req, res) => {
   try {
     const { title, description } = req.body;
     
     if (!title || !description) {
+      // Clean up uploaded file if validation fails
+      if (req.file) {
+        fs.unlinkSync(path.join(uploadsDir, req.file.filename));
+      }
       return res.status(400).json({ 
+        success: false,
         message: 'Title and description are required' 
       });
     }
 
-    const updateData = { title, description };
+    const existingItem = await Gallery.findById(req.params.id);
+    if (!existingItem) {
+      // Clean up uploaded file if item not found
+      if (req.file) {
+        fs.unlinkSync(path.join(uploadsDir, req.file.filename));
+      }
+      return res.status(404).json({
+        success: false,
+        message: 'Gallery item not found'
+      });
+    }
+
+    const updateData = { 
+      title,
+      description,
+      updatedAt: new Date()
+    };
     
-    // Handle new image upload if present
     if (req.file) {
       updateData.imageUrl = `/uploads/${req.file.filename}`;
       
       // Delete old image file
-      const existingItem = await Gallery.findById(req.params.id);
-      if (existingItem?.imageUrl) {
+      if (existingItem.imageUrl) {
         const oldFilename = existingItem.imageUrl.replace('/uploads/', '');
-        fs.unlink(path.join(uploadsDir, oldFilename), () => {});
+        fs.unlink(path.join(uploadsDir, oldFilename), (err) => {
+          if (err) console.error('Error deleting old image:', err);
+        });
       }
     }
 
@@ -106,15 +139,24 @@ router.put('/:id', auth, upload.single('image'), async (req, res) => {
       { new: true }
     );
 
-    if (!updatedItem) {
-      return res.status(404).json({ message: 'Gallery item not found' });
-    }
-
-    res.json(updatedItem);
+    res.json({
+      success: true,
+      message: 'Gallery item updated successfully',
+      data: updatedItem
+    });
   } catch (error) {
     console.error('Update error:', error);
+    
+    if (req.file) {
+      fs.unlink(path.join(uploadsDir, req.file.filename), () => {
+        console.log('Cleaned up uploaded file after failed update');
+      });
+    }
+    
     res.status(400).json({ 
-      message: error.message || 'Failed to update gallery item' 
+      success: false,
+      message: error.message || 'Failed to update gallery item',
+      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
@@ -125,19 +167,30 @@ router.delete('/:id', auth, async (req, res) => {
     const deletedItem = await Gallery.findByIdAndDelete(req.params.id);
     
     if (!deletedItem) {
-      return res.status(404).json({ message: 'Gallery item not found' });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Gallery item not found' 
+      });
     }
     
-    // Delete associated image file
     if (deletedItem.imageUrl) {
       const filename = deletedItem.imageUrl.replace('/uploads/', '');
-      fs.unlink(path.join(uploadsDir, filename), () => {});
+      fs.unlink(path.join(uploadsDir, filename), (err) => {
+        if (err) console.error('Error deleting image file:', err);
+      });
     }
     
-    res.json({ message: 'Gallery item deleted successfully' });
+    res.json({ 
+      success: true,
+      message: 'Gallery item deleted successfully'
+    });
   } catch (error) {
     console.error('Delete error:', error);
-    res.status(500).json({ message: 'Failed to delete gallery item' });
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to delete gallery item',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

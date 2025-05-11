@@ -31,20 +31,19 @@ router.post('/login', async (req, res) => {
     }
     
     // Create and sign JWT token
-    const token = jwt.sign(
-      { id: user._id },
-      process.env.JWT_SECRET || 'your_jwt_secret',
-      { expiresIn: '1d' }
-    );
-    
-    res.json({
-      token,
-      user: {
-        id: user._id,
-        username: user.username,
-        role: user.role,
-      },
-    });
+// When login succeeds:
+const token = jwt.sign(
+  { userId: user._id, email: user.email }, // Payload
+  process.env.JWT_SECRET || 'fallback_secret',
+  { expiresIn: '1d' } // Token expires in 1 day
+);
+
+// Send response
+res.json({
+  success: true,
+  token,
+  user: { id: user._id, name: user.name }
+});
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ message: 'Server error' });

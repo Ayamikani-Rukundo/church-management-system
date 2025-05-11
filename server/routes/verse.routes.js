@@ -34,22 +34,31 @@ router.get('/:id', async (req, res) => {
 // Create verse
 router.post('/', auth, async (req, res) => {
   try {
-    const { reference, text } = req.body;
+    const { book, chapter, verse, text, translation } = req.body;
     
-    if (!reference || !text) {
-      return res.status(400).json({ message: 'Please enter all fields' });
+    // Validate required fields
+    if (!book || !chapter || !verse || !text) {
+      return res.status(400).json({ 
+        message: 'Book, chapter, verse, and text are required' 
+      });
     }
-    
+
+    // Create new verse
     const newVerse = new Verse({
-      reference,
+      book,
+      chapter: Number(chapter),
+      verse: Number(verse),
       text,
+      translation: translation || 'NIV'
     });
-    
+
     const savedVerse = await newVerse.save();
     res.status(201).json(savedVerse);
   } catch (error) {
     console.error('Error creating verse:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ 
+      message: error.message || 'Server error' 
+    });
   }
 });
 

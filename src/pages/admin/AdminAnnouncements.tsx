@@ -25,6 +25,7 @@ interface Announcement {
   content: string;
   date: string;
 }
+const API_BASE_URL = 'http://localhost:5000/api'; 
 
 const AdminAnnouncements = () => {
   const navigate = useNavigate();
@@ -40,6 +41,7 @@ const AdminAnnouncements = () => {
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [announcementToDelete, setAnnouncementToDelete] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string>("list");
 
   useEffect(() => {
     // Check if user is authenticated
@@ -61,7 +63,7 @@ const AdminAnnouncements = () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await axios.get('/api/announcements', {
+      const response = await axios.get(`${API_BASE_URL}/announcements`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       
@@ -105,10 +107,19 @@ const AdminAnnouncements = () => {
     e.preventDefault();
     try {
       const token = localStorage.getItem('token');
-      
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+  
+      // Add your API base URL (make sure this matches your backend)
+      const API_BASE_URL = 'http://localhost:5000/api';
+  
       if (isEditing && currentId) {
-        await axios.put(`/api/announcements/${currentId}`, formData, {
-          headers: { Authorization: `Bearer ${token}` },
+        await axios.put(`${API_BASE_URL}/announcements/${currentId}`, formData, {
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
         });
         
         toast({
@@ -116,8 +127,11 @@ const AdminAnnouncements = () => {
           description: 'Announcement updated successfully!',
         });
       } else {
-        await axios.post('/api/announcements', formData, {
-          headers: { Authorization: `Bearer ${token}` },
+        await axios.post(`${API_BASE_URL}/announcements`, formData, {
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
         });
         
         toast({
@@ -137,14 +151,24 @@ const AdminAnnouncements = () => {
       fetchAnnouncements();
     } catch (error) {
       console.error('Error saving announcement:', error);
+      let errorMessage = 'Failed to save announcement. Please try again.';
+      
+      if (axios.isAxiosError(error)) {
+        errorMessage = error.response?.data?.message || errorMessage;
+        
+        // Handle unauthorized (401) errors
+        if (error.response?.status === 401) {
+          navigate('/admin/login');
+        }
+      }
+  
       toast({
         title: 'Error',
-        description: 'Failed to save announcement. Please try again.',
+        description: errorMessage,
         variant: 'destructive',
       });
     }
   };
-
   const handleEdit = (announcement: Announcement) => {
     setFormData({
       title: announcement.title,
@@ -153,6 +177,7 @@ const AdminAnnouncements = () => {
     });
     setIsEditing(true);
     setCurrentId(announcement._id);
+    setActiveTab("create"); 
   };
 
   const openDeleteDialog = (id: string) => {
@@ -165,8 +190,16 @@ const AdminAnnouncements = () => {
     
     try {
       const token = localStorage.getItem('token');
-      await axios.delete(`/api/announcements/${announcementToDelete}`, {
-        headers: { Authorization: `Bearer ${token}` },
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+  
+      const API_BASE_URL = 'http://localhost:5000/api';
+      
+      await axios.delete(`${API_BASE_URL}/announcements/${announcementToDelete}`, {
+        headers: { 
+          'Authorization': `Bearer ${token}` 
+        }
       });
       
       toast({
@@ -177,9 +210,20 @@ const AdminAnnouncements = () => {
       fetchAnnouncements();
     } catch (error) {
       console.error('Error deleting announcement:', error);
+      let errorMessage = 'Failed to delete announcement. Please try again.';
+      
+      if (axios.isAxiosError(error)) {
+        errorMessage = error.response?.data?.message || errorMessage;
+        
+        // Handle unauthorized (401) errors
+        if (error.response?.status === 401) {
+          navigate('/admin/login');
+        }
+      }
+  
       toast({
         title: 'Error',
-        description: 'Failed to delete announcement. Please try again.',
+        description: errorMessage,
         variant: 'destructive',
       });
     } finally {
@@ -187,7 +231,6 @@ const AdminAnnouncements = () => {
       setAnnouncementToDelete(null);
     }
   };
-
   const resetForm = () => {
     setFormData({
       title: '',
@@ -196,6 +239,7 @@ const AdminAnnouncements = () => {
     });
     setIsEditing(false);
     setCurrentId(null);
+    setActiveTab("list");
   };
 
   return (
@@ -215,20 +259,25 @@ const AdminAnnouncements = () => {
           <h1 className="text-2xl font-serif font-bold">Manage Announcements</h1>
         </div>
 
-        <Tabs defaultValue="list">
-          <TabsList className="mb-6">
-            <TabsTrigger value="list">All Announcements</TabsTrigger>
-            <TabsTrigger value="create">{isEditing ? 'Edit Announcement' : 'Create New'}</TabsTrigger>
-          </TabsList>
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+  <TabsList className="mb-6">
+    <TabsTrigger value="list">All Announcements</TabsTrigger>
+    <TabsTrigger value="create">Create New</TabsTrigger>
+  </TabsList>
 
-          <TabsContent value="list">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-medium">All Announcements</h2>
-              <Button onClick={() => resetForm()}>
-                <Plus className="h-4 w-4 mr-2" />
-                Add New
-              </Button>
-            </div>
+  <TabsContent value="list">
+    <div className="flex justify-between items-center mb-4">
+      <h2 className="text-xl font-medium">All Announcements</h2>
+      <Button 
+        onClick={() => {
+          resetForm();
+          setActiveTab("create");
+        }}
+      >
+        <Plus className="h-4 w-4 mr-2" />
+        Add New
+      </Button>
+    </div>
 
             {loading ? (
               <div className="flex justify-center items-center h-64">

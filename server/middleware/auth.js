@@ -1,19 +1,27 @@
 import jwt from 'jsonwebtoken';
 
 const auth = (req, res, next) => {
-  // Get token from header
-  const token = req.header('x-auth-token');
+  // Check token in these locations:
+  const token = req.header('x-auth-token') || 
+               req.cookies?.token || 
+               req.headers?.authorization?.split(' ')[1];
   
   if (!token) {
-    return res.status(401).json({ message: 'No token, authorization denied' });
+    return res.status(401).json({ 
+      success: false,
+      message: 'No token found' 
+    });
   }
   
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
-    req.user = decoded;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret');
+    req.user = decoded.user || decoded; // Works with both formats
     next();
   } catch (error) {
-    res.status(401).json({ message: 'Token is not valid' });
+    return res.status(401).json({ 
+      success: false,
+      message: 'Invalid/expired token' 
+    });
   }
 };
 

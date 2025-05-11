@@ -1,6 +1,13 @@
 import express from 'express';
 import Book from '../models/Book.js';
 import auth from '../middleware/auth.js';
+import { uploadBookFiles } from '../middleware/upload.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 
@@ -31,27 +38,50 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Create book
-router.post('/', auth, async (req, res) => {
-  try {
-    const { title, author, description, imageUrl, fileUrl } = req.body;
-    
-    if (!title || !author || !description || !imageUrl) {
-      return res.status(400).json({ message: 'Please enter all required fields' });
+// Create book with file uploads
+router.post('/', auth, (req, res, next) => {
+  uploadBookFiles(req, res, (err) => {
+    if (err) {
+      console.error('Upload error:', err);
+      return res.status(400).json({ 
+        success: false,
+        message: err.message 
+      });
     }
-    
+    next();
+  });
+}, async (req, res) => {
+  try {
+    const { title, author, description } = req.body;
+    const bookFile = req.files['bookFile']?.[0];
+    const coverImage = req.files['coverImage']?.[0];
+
+    if (!title || !author || !description || !bookFile || !coverImage) {
+      // Clean up uploaded files if validation fails
+      if (bookFile) fs.unlinkSync(bookFile.path);
+      if (coverImage) fs.unlinkSync(coverImage.path);
+      return res.status(400).json({ 
+        message: 'All fields and both files are required' 
+      });
+    }
+
     const newBook = new Book({
       title,
       author,
       description,
-      imageUrl,
-      fileUrl,
+      fileUrl: `/uploads/${bookFile.filename}`,
+      coverUrl: `/uploads/${coverImage.filename}`
     });
-    
+
     const savedBook = await newBook.save();
     res.status(201).json(savedBook);
   } catch (error) {
     console.error('Error creating book:', error);
+    // Clean up files if error occurs
+    if (req.files) {
+      if (req.files['bookFile']) fs.unlinkSync(req.files['bookFile'][0].path);
+      if (req.files['coverImage']) fs.unlinkSync(req.files['coverImage'][0].path);
+    }
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -59,15 +89,15 @@ router.post('/', auth, async (req, res) => {
 // Update book
 router.put('/:id', auth, async (req, res) => {
   try {
-    const { title, author, description, imageUrl, fileUrl } = req.body;
+    const { title, author, description, fileUrl, coverUrl } = req.body;
     
     if (!title || !author || !description) {
       return res.status(400).json({ message: 'Please enter all required fields' });
     }
     
     const updateData = { title, author, description };
-    if (imageUrl) updateData.imageUrl = imageUrl;
     if (fileUrl !== undefined) updateData.fileUrl = fileUrl;
+    if (coverUrl !== undefined) updateData.coverUrl = coverUrl;
     
     const updatedBook = await Book.findByIdAndUpdate(
       req.params.id,
@@ -86,14 +116,25 @@ router.put('/:id', auth, async (req, res) => {
   }
 });
 
-// Delete book
+// Delete book (with file cleanup)
 router.delete('/:id', auth, async (req, res) => {
   try {
-    const deletedBook = await Book.findByIdAndDelete(req.params.id);
+    const book = await Book.findById(req.params.id);
     
-    if (!deletedBook) {
+    if (!book) {
       return res.status(404).json({ message: 'Book not found' });
     }
+
+    // Delete associated files
+    try {
+      if (book.fileUrl) fs.unlinkSync(book.fileUrl);
+      if (book.coverUrl) fs.unlinkSync(book.coverUrl);
+    } catch (fileError) {
+      console.error('Error deleting book files:', fileError);
+    }
+
+    // Delete from database
+    await Book.findByIdAndDelete(req.params.id);
     
     res.json({ message: 'Book deleted successfully' });
   } catch (error) {

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
@@ -19,7 +18,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 
-const API_BASE_URL = 'http://localhost:5000'; 
+const API_BASE_URL = 'http://localhost:5000';
 
 interface GalleryItem {
   _id: string;
@@ -44,38 +43,47 @@ const AdminGallery = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('list'); 
 
-  useEffect(() => {
-    // Check if user is authenticated
+  // Get auth headers with proper error handling
+  const getAuthHeaders = () => {
     const token = localStorage.getItem('token');
     if (!token) {
-      toast({
-        title: 'Authentication Error',
-        description: 'Please login to access the admin dashboard.',
-        variant: 'destructive',
-      });
+      navigate('/admin/login');
+      throw new Error('No authentication token');
+    }
+    return {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'multipart/form-data'
+      }
+    };
+  };
+
+  useEffect(() => {
+    fetchGallery();
+  }, []);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
       navigate('/admin/login');
       return;
     }
-
     fetchGallery();
-  }, [navigate, toast]);
+  }, [navigate]);
 
   const fetchGallery = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_BASE_URL}/api/gallery`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      
-      // Ensure response.data is always an array
-      const data = Array.isArray(response.data) ? response.data : [];
-      setGallery(data);
-      
+      const response = await axios.get(`${API_BASE_URL}/api/gallery`, getAuthHeaders());
+      setGallery(Array.isArray(response.data) ? response.data : []);
     } catch (error) {
       console.error('Error:', error);
-      setGallery([]); // Reset to empty array on error
+      if (error.response?.status === 401) {
+        navigate('/admin/login');
+      }
       toast({
         title: 'Error',
         description: 'Failed to load gallery',
@@ -108,17 +116,12 @@ const AdminGallery = () => {
     try {
       setUploading(true);
       const formData = new FormData();
-      formData.append('image', selectedFile); // Changed from 'file' to 'image'
-  
+      formData.append('image', selectedFile);
+
       const response = await axios.post(
         `${API_BASE_URL}/api/upload`,
         formData,
-        {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-            'Content-Type': 'multipart/form-data'
-          }
-        }
+        getAuthHeaders()
       );
   
       setFormData(prev => ({
@@ -126,12 +129,12 @@ const AdminGallery = () => {
         imageUrl: response.data.fileUrl
       }));
       
-      toast({ title: 'Success', description: 'Image uploaded!' });
+      toast({ title: 'Success', description: 'Image uploaded successfully!' });
     } catch (error) {
       console.error('Upload failed:', error);
       toast({
         title: 'Upload Error',
-        description: error.response?.data?.message || 'Upload failed',
+        description: error.response?.data?.message || 'Failed to upload image',
         variant: 'destructive'
       });
     } finally {
@@ -143,40 +146,37 @@ const AdminGallery = () => {
     e.preventDefault();
     
     try {
-      const token = localStorage.getItem('token');
-      const data = new FormData(); // Renamed to avoid conflict
-      data.append('title', formData.title);
-      data.append('description', formData.description);
+      const formPayload = new FormData();
+      formPayload.append('title', formData.title);
+      formPayload.append('description', formData.description);
       
-      // Only append image if new file was selected
       if (selectedFile) {
-        data.append('image', selectedFile);
+        formPayload.append('image', selectedFile);
       } else if (formData.imageUrl) {
-        // For edits when keeping existing image
-        data.append('imageUrl', formData.imageUrl);
+        formPayload.append('imageUrl', formData.imageUrl);
       }
-  
+
       const url = isEditing && currentId 
         ? `${API_BASE_URL}/api/gallery/${currentId}`
         : `${API_BASE_URL}/api/gallery`;
-  
+
       const method = isEditing ? 'put' : 'post';
       
-      await axios[method](url, data, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data'
-        }
+      await axios[method](url, formPayload, getAuthHeaders());
+
+      toast({ 
+        title: 'Success', 
+        description: `Item ${isEditing ? 'updated' : 'added'} successfully!` 
       });
-  
-      toast({ title: 'Success', description: `Item ${isEditing ? 'updated' : 'added'}!` });
+      
       resetForm();
       fetchGallery();
+      setActiveTab('list');
     } catch (error) {
       console.error('Save error:', error);
       toast({
         title: 'Error',
-        description: error.response?.data?.message || 'Failed to save',
+        description: error.response?.data?.message || 'Failed to save changes',
         variant: 'destructive'
       });
     }
@@ -190,21 +190,16 @@ const AdminGallery = () => {
     });
     setIsEditing(true);
     setCurrentId(item._id);
-  };
-
-  const openDeleteDialog = (id: string) => {
-    setItemToDelete(id);
-    setDeleteDialogOpen(true);
+    setActiveTab('create');
+    setSelectedFile(null);
   };
 
   const handleDelete = async () => {
     if (!itemToDelete) return;
     
     try {
-      const token = localStorage.getItem('token');
-      await axios.delete(`${API_BASE_URL}/api/gallery/${itemToDelete}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      setDeleteLoading(true);
+      await axios.delete(`${API_BASE_URL}/api/gallery/${itemToDelete}`, getAuthHeaders());
       
       toast({
         title: 'Success',
@@ -213,15 +208,16 @@ const AdminGallery = () => {
       
       fetchGallery();
     } catch (error) {
-      console.error('Error deleting gallery item:', error);
+      console.error('Delete error:', error);
       toast({
         title: 'Error',
-        description: 'Failed to delete gallery item. Please try again.',
+        description: error.response?.data?.message || 'Failed to delete item',
         variant: 'destructive',
       });
     } finally {
       setDeleteDialogOpen(false);
       setItemToDelete(null);
+      setDeleteLoading(false);
     }
   };
 
@@ -234,6 +230,11 @@ const AdminGallery = () => {
     setSelectedFile(null);
     setIsEditing(false);
     setCurrentId(null);
+  };
+
+  const handleAddNewClick = () => {
+    resetForm();
+    setActiveTab('create');
   };
 
   return (
@@ -253,7 +254,7 @@ const AdminGallery = () => {
           <h1 className="text-2xl font-serif font-bold">Manage Gallery</h1>
         </div>
 
-        <Tabs defaultValue="list">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-6">
             <TabsTrigger value="list">All Photos</TabsTrigger>
             <TabsTrigger value="create">{isEditing ? 'Edit Photo' : 'Add New Photo'}</TabsTrigger>
@@ -262,7 +263,7 @@ const AdminGallery = () => {
           <TabsContent value="list">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-medium">Gallery Photos</h2>
-              <Button onClick={() => resetForm()}>
+              <Button onClick={handleAddNewClick}>
                 <Plus className="h-4 w-4 mr-2" />
                 Add New Photo
               </Button>
@@ -274,35 +275,28 @@ const AdminGallery = () => {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-  {/* First check if gallery exists, then check length */}
-  {!gallery || gallery.length === 0 ? (
-    <Card className="col-span-full">
-      <CardContent className="py-8 text-center">
-        <p className="text-gray-500">No gallery items found. Add your first photo!</p>
-      </CardContent>
-    </Card>
-  ) : (
-    gallery.map((item) => (
-      <Card key={item._id} className="overflow-hidden">
-        <div className="aspect-square overflow-hidden">
-          <img 
-            src={item.imageUrl} 
-            alt={item.title}
-            className="w-full h-full object-cover transition-transform hover:scale-105"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = '/fallback-image.jpg';
-            }}
-          />
-        </div>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-lg">{item.title || 'Untitled'}</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <p className="text-gray-600 text-sm">
-            {item.description?.substring(0, 100) || 'No description'}
-          </p>
-        </CardContent>
-          <CardFooter className="flex justify-end space-x-2 pt-2">
+                {gallery.length > 0 ? (
+                  gallery.map((item) => (
+                    <Card key={item._id} className="overflow-hidden group">
+                      <div className="aspect-square overflow-hidden relative">
+                        <img 
+                          src={item.imageUrl} 
+                          alt={item.title}
+                          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = '/fallback-image.jpg';
+                          }}
+                        />
+                      </div>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-lg">{item.title || 'Untitled'}</CardTitle>
+                      </CardHeader>
+                      <CardContent className="pt-0">
+                        <p className="text-gray-600 text-sm line-clamp-2">
+                          {item.description || 'No description'}
+                        </p>
+                      </CardContent>
+                      <CardFooter className="flex justify-end gap-2 pt-2">
                         <Button 
                           variant="outline" 
                           size="sm"
@@ -313,15 +307,24 @@ const AdminGallery = () => {
                         <Button 
                           variant="destructive" 
                           size="sm"
-                          onClick={() => openDeleteDialog(item._id)}
+                          onClick={() => {
+                            setItemToDelete(item._id);
+                            setDeleteDialogOpen(true);
+                          }}
                         >
                           <Trash2 className="h-4 w-4 mr-1" /> Delete
                         </Button>
-          </CardFooter>
-      </Card>
-    ))
-  )}
-</div>
+                      </CardFooter>
+                    </Card>
+                  ))
+                ) : (
+                  <Card className="col-span-full">
+                    <CardContent className="py-8 text-center">
+                      <p className="text-gray-500">No gallery items found. Add your first photo!</p>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
             )}
           </TabsContent>
 
@@ -334,7 +337,7 @@ const AdminGallery = () => {
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div>
                     <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">
-                      Title
+                      Title *
                     </label>
                     <Input
                       id="title"
@@ -348,7 +351,7 @@ const AdminGallery = () => {
                   
                   <div>
                     <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">
-                      Description
+                      Description *
                     </label>
                     <Textarea
                       id="description"
@@ -363,34 +366,39 @@ const AdminGallery = () => {
                   
                   <div>
                     <label htmlFor="image" className="block text-sm font-medium text-gray-700 mb-1">
-                      Image
+                      Image *
                     </label>
-                    {formData.imageUrl && (
-                      <div className="mb-2">
+                    {formData.imageUrl ? (
+                      <div className="mb-4">
                         <img 
                           src={formData.imageUrl} 
-                          alt="Preview" 
-                          className="w-full max-h-60 object-cover rounded-md"
+                          alt="Current preview" 
+                          className="w-full max-h-60 object-contain rounded-md border"
                         />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Current image (upload new one to replace)
+                        </p>
                       </div>
-                    )}
+                    ) : null}
                     <div className="flex gap-2">
                       <Input
                         id="image"
                         type="file"
                         onChange={handleFileChange}
                         accept="image/*"
+                        className="cursor-pointer"
                       />
                       <Button 
                         type="button" 
                         onClick={handleUpload} 
                         disabled={!selectedFile || uploading}
+                        className="min-w-[100px]"
                       >
                         {uploading ? (
-                          <div className="flex items-center">
+                          <>
                             <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>
-                            Uploading...
-                          </div>
+                            Uploading
+                          </>
                         ) : (
                           <>
                             <Upload className="h-4 w-4 mr-1" /> Upload
@@ -398,20 +406,33 @@ const AdminGallery = () => {
                         )}
                       </Button>
                     </div>
+                    {!formData.imageUrl && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Please upload an image before submitting
+                      </p>
+                    )}
                   </div>
                   
-                  <div className="flex justify-end space-x-2">
-                    {isEditing && (
-                      <Button 
-                        type="button" 
-                        variant="outline"
-                        onClick={resetForm}
-                      >
-                        Cancel
-                      </Button>
-                    )}
-                    <Button type="submit">
-                      {isEditing ? 'Update' : 'Add to Gallery'}
+                  <div className="flex justify-end gap-2 pt-4">
+                    <Button 
+                      type="button" 
+                      variant="outline"
+                      onClick={() => {
+                        resetForm();
+                        setActiveTab('list');
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      type="submit"
+                      disabled={
+                        !formData.title || 
+                        !formData.description || 
+                        (!formData.imageUrl && !selectedFile)
+                      }
+                    >
+                      {isEditing ? 'Update Gallery Item' : 'Add to Gallery'}
                     </Button>
                   </div>
                 </form>
@@ -421,7 +442,6 @@ const AdminGallery = () => {
         </Tabs>
       </main>
 
-      {/* Delete confirmation dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -431,11 +451,26 @@ const AdminGallery = () => {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+            <Button 
+              variant="outline" 
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={deleteLoading}
+            >
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleDelete}>
-              Delete
+            <Button 
+              variant="destructive" 
+              onClick={handleDelete}
+              disabled={deleteLoading}
+            >
+              {deleteLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>
+                  Deleting...
+                </>
+              ) : (
+                'Delete Permanently'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

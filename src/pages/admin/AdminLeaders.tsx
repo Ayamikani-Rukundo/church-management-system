@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Pencil, Trash2, ArrowLeft, Plus, Upload } from 'lucide-react';
+import { Pencil, Trash2, ArrowLeft, Plus, Upload, Loader2 } from 'lucide-react';
 import axios from 'axios';
 import AdminHeader from '@/components/admin/AdminHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -27,6 +26,8 @@ interface Leader {
   imageUrl: string;
 }
 
+const API_BASE_URL = 'http://localhost:5000';
+
 const AdminLeaders = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -44,9 +45,9 @@ const AdminLeaders = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [leaderToDelete, setLeaderToDelete] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>("list");
 
   useEffect(() => {
-    // Check if user is authenticated
     const token = localStorage.getItem('token');
     if (!token) {
       toast({
@@ -57,7 +58,6 @@ const AdminLeaders = () => {
       navigate('/admin/login');
       return;
     }
-
     fetchLeaders();
   }, [navigate, toast]);
 
@@ -65,26 +65,19 @@ const AdminLeaders = () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await axios.get('/api/leaders', {
+      const response = await axios.get(`${API_BASE_URL}/api/leaders`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       
       if (Array.isArray(response.data)) {
         setLeaders(response.data);
-      } else if (response.data && typeof response.data === 'object') {
-        const possibleArrays = Object.values(response.data).filter(val => Array.isArray(val));
-        if (possibleArrays.length > 0) {
-          setLeaders(possibleArrays[0] as Leader[]);
-        } else {
-          setLeaders([]);
-          toast({
-            title: 'Data Error',
-            description: 'Received invalid data format from server.',
-            variant: 'destructive',
-          });
-        }
       } else {
         setLeaders([]);
+        toast({
+          title: 'Data Error',
+          description: 'Received invalid data format from server.',
+          variant: 'destructive',
+        });
       }
     } catch (error) {
       console.error('Error fetching leaders:', error);
@@ -114,91 +107,111 @@ const AdminLeaders = () => {
   const handleUpload = async () => {
     if (!selectedFile) {
       toast({
-        title: 'Error',
-        description: 'Please select a file to upload.',
-        variant: 'destructive',
+        title: 'No File Selected',
+        description: 'Please select an image file first',
+        variant: 'destructive'
       });
       return;
     }
-
+  
     try {
       setUploading(true);
-      const token = localStorage.getItem('token');
+      
       const formData = new FormData();
-      formData.append('file', selectedFile);
-      
-      const response = await axios.post('/api/upload', formData, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-      
+      formData.append('image', selectedFile);
+  
+      const response = await axios.post(
+        `${API_BASE_URL}/api/upload`,
+        formData,
+        {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            'Content-Type': 'multipart/form-data'
+          }
+        }
+      );
+  
+      if (!response.data.success || !response.data.data?.url) {
+        throw new Error(response.data.message || 'Invalid server response');
+      }
+  
       setFormData(prev => ({
         ...prev,
-        imageUrl: response.data.fileUrl,
+        imageUrl: response.data.data.url
       }));
-      
+  
       toast({
         title: 'Success',
         description: 'Image uploaded successfully!',
       });
+  
     } catch (error) {
-      console.error('Error uploading image:', error);
+      console.error('Upload error:', error);
       toast({
-        title: 'Error',
-        description: 'Failed to upload image. Please try again.',
-        variant: 'destructive',
+        title: 'Upload Failed',
+        description: error.response?.data?.message || error.message || 'Failed to upload image',
+        variant: 'destructive'
       });
     } finally {
       setUploading(false);
     }
   };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.imageUrl) {
-      toast({
-        title: 'Error',
-        description: 'Please upload a profile image first.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    
     try {
       const token = localStorage.getItem('token');
-      
-      if (isEditing && currentId) {
-        await axios.put(`/api/leaders/${currentId}`, formData, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        
-        toast({
-          title: 'Success',
-          description: 'Leader profile updated successfully!',
-        });
-      } else {
-        await axios.post('/api/leaders', formData, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        
-        toast({
-          title: 'Success',
-          description: 'Leader profile created successfully!',
-        });
+      if (!token) {
+        navigate('/admin/login');
+        return;
       }
+  
+      // Use the default church ID you created
+      const defaultChurchId = "000000000000000000000001";
       
-      // Reset form and fetch updated list
+      // Prepare submission data
+      const submissionData = {
+        name: formData.name.trim(),
+        position: formData.position.trim(),
+        bio: formData.bio.trim(),
+        imageUrl: formData.imageUrl,
+        church: defaultChurchId // Using your default church ID
+      };
+  
+      const url = isEditing && currentId
+        ? `${API_BASE_URL}/api/leaders/${currentId}`
+        : `${API_BASE_URL}/api/leaders`;
+  
+      const method = isEditing ? 'put' : 'post';
+  
+      const response = await axios[method](url, submissionData, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+  
+      toast({
+        title: 'Success',
+        description: `Leader ${isEditing ? 'updated' : 'added'} successfully!`,
+      });
+  
       resetForm();
+      setActiveTab("list");
       fetchLeaders();
+  
     } catch (error) {
-      console.error('Error saving leader:', error);
+      console.error('Submission error:', error);
+      
+      let errorMessage = 'Failed to save leader. Please try again.';
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      }
+  
       toast({
         title: 'Error',
-        description: 'Failed to save leader profile. Please try again.',
-        variant: 'destructive',
+        description: errorMessage,
+        variant: 'destructive'
       });
     }
   };
@@ -212,6 +225,7 @@ const AdminLeaders = () => {
     });
     setIsEditing(true);
     setCurrentId(leader._id);
+    setActiveTab("create");
   };
 
   const openDeleteDialog = (id: string) => {
@@ -224,7 +238,7 @@ const AdminLeaders = () => {
     
     try {
       const token = localStorage.getItem('token');
-      await axios.delete(`/api/leaders/${leaderToDelete}`, {
+      await axios.delete(`${API_BASE_URL}/api/leaders/${leaderToDelete}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       
@@ -276,7 +290,7 @@ const AdminLeaders = () => {
           <h1 className="text-2xl font-serif font-bold">Manage Church Leaders</h1>
         </div>
 
-        <Tabs defaultValue="list">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-6">
             <TabsTrigger value="list">All Leaders</TabsTrigger>
             <TabsTrigger value="create">{isEditing ? 'Edit Leader' : 'Add New Leader'}</TabsTrigger>
@@ -285,7 +299,7 @@ const AdminLeaders = () => {
           <TabsContent value="list">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-medium">Church Leadership</h2>
-              <Button onClick={() => resetForm()}>
+              <Button onClick={() => { resetForm(); setActiveTab("create"); }}>
                 <Plus className="h-4 w-4 mr-2" />
                 Add New Leader
               </Button>
@@ -395,48 +409,53 @@ const AdminLeaders = () => {
                       onChange={handleInputChange}
                       placeholder="Brief biography or introduction..."
                       rows={4}
-                      required
                     />
                   </div>
                   
-                  <div>
-                    <label htmlFor="image" className="block text-sm font-medium text-gray-700 mb-1">
-                      Profile Image
-                    </label>
-                    {formData.imageUrl && (
-                      <div className="mb-2">
-                        <img 
-                          src={formData.imageUrl} 
-                          alt="Preview" 
-                          className="h-40 w-40 object-cover rounded-md"
-                        />
-                      </div>
-                    )}
-                    <div className="flex gap-2">
-                      <Input
-                        id="image"
-                        type="file"
-                        onChange={handleFileChange}
-                        accept="image/*"
-                      />
-                      <Button 
-                        type="button" 
-                        onClick={handleUpload} 
-                        disabled={!selectedFile || uploading}
-                      >
-                        {uploading ? (
-                          <div className="flex items-center">
-                            <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>
-                            Uploading...
-                          </div>
-                        ) : (
-                          <>
-                            <Upload className="h-4 w-4 mr-1" /> Upload
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  </div>
+                  <div className="space-y-4">
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">
+      Profile Image
+    </label>
+    
+    {formData.imageUrl ? (
+      <div className="mb-3">
+        <img
+          src={formData.imageUrl}
+          alt="Preview"
+          className="h-32 w-32 object-cover rounded-md border"
+        />
+        <p className="text-sm text-green-600 mt-1">Image uploaded successfully</p>
+      </div>
+    ) : (
+      <div className="flex items-center gap-3">
+        <label className="flex-1 border rounded-md p-4 flex flex-col items-center cursor-pointer hover:bg-gray-50">
+          <Upload className="h-6 w-6 text-gray-400 mb-2" />
+          <span className="text-sm">
+            {selectedFile ? selectedFile.name : 'Click to select image'}
+          </span>
+          <input
+            type="file"
+            className="hidden"
+            onChange={handleFileChange}
+            accept="image/*"
+          />
+        </label>
+        
+        <Button
+          type="button"
+          onClick={handleUpload}
+          disabled={!selectedFile || uploading}
+        >
+          {uploading ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : null}
+          {uploading ? 'Uploading...' : 'Upload'}
+        </Button>
+      </div>
+    )}
+  </div>
+</div>
                   
                   <div className="flex justify-end space-x-2">
                     {isEditing && (
@@ -448,7 +467,7 @@ const AdminLeaders = () => {
                         Cancel
                       </Button>
                     )}
-                    <Button type="submit">
+                    <Button type="submit" disabled={!formData.imageUrl}>
                       {isEditing ? 'Update' : 'Add Leader'}
                     </Button>
                   </div>
@@ -459,7 +478,6 @@ const AdminLeaders = () => {
         </Tabs>
       </main>
 
-      {/* Delete confirmation dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>

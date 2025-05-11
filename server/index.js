@@ -4,151 +4,172 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import path from 'path';
-import multer from 'multer';
-import { v4 as uuidv4 } from 'uuid';
-import fs from 'fs';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
-// Load environment variables
+// ==============================================
+// INITIAL CONFIGURATION
+// ==============================================
+
+// Load environment variables from .env file
 dotenv.config();
 
 // Get __dirname equivalent in ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import upload from '../middleware/upload.js';
-// Import routes
+// Initialize Express application
+const app = express();
+
+// ==============================================
+// SECURITY MIDDLEWARE
+// ==============================================
+
+// Set security-related HTTP headers
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https://*.mongodb.com", process.env.FRONTEND_URL || 'http://localhost:8080']
+    }
+  },
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+
+// Disable X-Powered-By header
+app.disable('x-powered-by');
+
+// Configure CORS
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:8080',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+}));
+
+// Parse JSON requests with 10mb limit
+app.use(express.json({ limit: '10mb' }));
+
+// ==============================================
+// FILE UPLOAD CONFIGURATION
+// ==============================================
+
+// Ensure uploads directory exists
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+// Serve static files from uploads directory
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// ==============================================
+// ROUTE IMPORTS
+// ==============================================
+
 import authRoutes from './routes/auth.routes.js';
 import galleryRoutes from './routes/gallery.routes.js';
 import leaderRoutes from './routes/leader.routes.js';
 import announcementRoutes from './routes/announcement.routes.js';
 import bookRoutes from './routes/book.routes.js';
 import verseRoutes from './routes/verse.routes.js';
-
-// Initialize Express app
-const app = express();
+import uploadRoutes from './routes/upload.routes.js';
 
 // ==============================================
-// SECURITY CONFIGURATION
+// APPLICATION ROUTES
 // ==============================================
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https://*.mongodb.com"]
-    }
-  },
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
-app.disable('x-powered-by');
-app.use(cors({
-  origin: process.env.FRONTEND_URLS ? 
-    process.env.FRONTEND_URLS.split(',') : 
-    'http://localhost:8080',
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE']
-}));
-app.use(express.json({ limit: '10mb' }));
 
-// ==============================================
-// FILE UPLOAD CONFIGURATION
-// ==============================================
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => cb(null, `${uuidv4()}-${file.originalname}`)
-});
-
-const upload = multer({ 
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
-});
-
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// ==============================================
-// ROUTES
-// ==============================================
-app.use(express.json()); // Before routes
-app.use(cors()); // Before routes
-
-app.use('/api/upload', uploadRoutes);
+// Authentication routes
 app.use('/api/auth', authRoutes);
+
+// Resource routes
 app.use('/api/gallery', galleryRoutes);
 app.use('/api/leaders', leaderRoutes);
 app.use('/api/announcements', announcementRoutes);
 app.use('/api/books', bookRoutes);
 app.use('/api/verses', verseRoutes);
 
-app.post('/api/upload', upload.single('file'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ 
-      success: false,
-      message: 'No file uploaded' 
-    });
-  }
-  res.status(201).json({ 
-    success: true,
-    message: 'File uploaded successfully',
-    fileUrl: `/uploads/${req.file.filename}`,
-    fileName: req.file.originalname
+// File upload route
+app.use('/api/upload', uploadRoutes);
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    timestamp: new Date(),
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
   });
 });
 
 // ==============================================
 // PRODUCTION CONFIGURATION
 // ==============================================
+
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../build')));
+  // Serve static files from React build directory
+  app.use(express.static(path.join(__dirname, '../client/build')));
+  
+  // Handle React routing, return all requests to React app
   app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../build', 'index.html'));
+    res.sendFile(path.join(__dirname, '../client/build', 'index.html'));
   });
 }
 
 // ==============================================
-// ERROR HANDLING
+// ERROR HANDLING MIDDLEWARE
 // ==============================================
-// Add this right before app.use(errorHandler)
-app.get('/api/test', (req, res) => {
-  res.json({ status: "Backend is working!", time: new Date() });
+
+// 404 Not Found handler
+app.use((req, res, next) => {
+  res.status(404).json({
+    success: false,
+    error: 'Endpoint not found'
+  });
 });
 
+// Global error handler
 app.use((err, req, res, next) => {
   console.error('[SERVER ERROR]', err.stack);
-  res.status(500).json({ 
+  
+  const statusCode = err.statusCode || 500;
+  const errorMessage = process.env.NODE_ENV === 'development' 
+    ? err.message 
+    : 'Internal Server Error';
+  
+  res.status(statusCode).json({
     success: false,
-    error: process.env.NODE_ENV === 'development' ? 
-      err.message : 'Internal Server Error'
+    error: errorMessage
   });
 });
 
 // ==============================================
-// MONGODB ATLAS CONNECTION (ENHANCED)
+// DATABASE CONNECTION
 // ==============================================
+
 const connectToDatabase = async () => {
   const MONGODB_URI = process.env.MONGODB_URI;
-  
+ 
   if (!MONGODB_URI) {
     console.error('[DB ERROR] MONGODB_URI not found in environment variables');
     process.exit(1);
   }
 
   try {
-    await mongoose.connect(MONGODB_URI, {
+    // Configure MongoDB connection options
+    const mongooseOptions = {
       serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 45000,
       maxPoolSize: 50,
       w: 'majority',
       retryWrites: true,
-      appName: 'Campus-Church-App'
-    });
+      appName: 'Church-App'
+    };
 
-    console.log('✅ [MONGODB] Successfully connected to Atlas cluster');
-    
+    // Establish connection
+    await mongoose.connect(MONGODB_URI, mongooseOptions);
+
+    console.log('✅ [MONGODB] Successfully connected to database');
+
+    // Connection event listeners
     mongoose.connection.on('connected', () => {
       console.log('🔄 [MONGODB] Connection re-established');
     });
@@ -161,11 +182,11 @@ const connectToDatabase = async () => {
       console.warn('⚠️ [MONGODB] Connection lost');
     });
 
-    // Start server only after successful DB connection
+    // Start the server after successful DB connection
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => {
       console.log(`🚀 [SERVER] Running on port ${PORT}`);
-      console.log(`🌐 [FRONTEND] Access at ${process.env.FRONTEND_URLS || 'http://localhost:8080'}`);
+      console.log(`🌐 [FRONTEND] Access at ${process.env.FRONTEND_URL || 'http://localhost:8080'}`);
     });
 
   } catch (err) {
@@ -178,5 +199,12 @@ const connectToDatabase = async () => {
   }
 };
 
-// Initialize connection
+// Initialize database connection
 connectToDatabase();
+
+// Graceful shutdown handler
+process.on('SIGINT', async () => {
+  await mongoose.connection.close();
+  console.log('⏏️ [SERVER] Gracefully shutting down');
+  process.exit(0);
+});

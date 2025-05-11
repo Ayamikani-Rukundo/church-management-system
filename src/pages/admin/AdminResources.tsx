@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,6 +18,8 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+const API_BASE_URL = 'http://localhost:5000/api';
 
 interface BookResource {
   _id: string;
@@ -68,9 +69,10 @@ const AdminResources = () => {
   const [resourceToDelete, setResourceToDelete] = useState<string | null>(null);
   const [resourceType, setResourceType] = useState<'book' | 'verse'>('book');
   const [uploading, setUploading] = useState(false);
+  const [booksTab, setBooksTab] = useState('list'); // 'list' or 'create'
+const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
 
   useEffect(() => {
-    // Check if user is authenticated
     const token = localStorage.getItem('token');
     if (!token) {
       toast({
@@ -93,23 +95,15 @@ const AdminResources = () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await axios.get('/api/books', {
+      const response = await axios.get(`${API_BASE_URL}/books`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       
       if (Array.isArray(response.data)) {
         setBooks(response.data);
-      } else if (response.data && typeof response.data === 'object') {
-        const possibleArrays = Object.values(response.data).filter(val => Array.isArray(val));
-        if (possibleArrays.length > 0) {
-          setBooks(possibleArrays[0] as BookResource[]);
-        } else {
-          setBooks([]);
-          console.log('Could not find books array in response:', response.data);
-        }
       } else {
         setBooks([]);
-        console.error('Expected books array but got:', response.data);
+        console.error('Unexpected response format:', response.data);
       }
     } catch (error) {
       console.error('Error fetching books:', error);
@@ -127,23 +121,15 @@ const AdminResources = () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await axios.get('/api/verses', {
+      const response = await axios.get(`${API_BASE_URL}/verses`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       
       if (Array.isArray(response.data)) {
         setVerses(response.data);
-      } else if (response.data && typeof response.data === 'object') {
-        const possibleArrays = Object.values(response.data).filter(val => Array.isArray(val));
-        if (possibleArrays.length > 0) {
-          setVerses(possibleArrays[0] as BibleVerse[]);
-        } else {
-          setVerses([]);
-          console.log('Could not find verses array in response:', response.data);
-        }
       } else {
         setVerses([]);
-        console.error('Expected verses array but got:', response.data);
+        console.error('Unexpected response format:', response.data);
       }
     } catch (error) {
       console.error('Error fetching verses:', error);
@@ -188,45 +174,46 @@ const AdminResources = () => {
     }
   };
 
-  const handleFileUpload = async (fileType: 'file' | 'cover') => {
-    const fileToUpload = fileType === 'file' ? selectedFile : selectedCover;
-    
-    if (!fileToUpload) {
+  const handleFileUpload = async (fileType: 'bookFile' | 'coverImage') => {
+    const fileInput = fileType === 'bookFile' ? bookFileInputRef.current : coverImageInputRef.current;
+    const file = fileInput?.files?.[0];
+  
+    if (!file) {
       toast({
         title: 'Error',
-        description: `Please select a ${fileType} to upload.`,
+        description: `Please select a ${fileType === 'bookFile' ? 'book file' : 'cover image'}`,
         variant: 'destructive',
       });
       return;
     }
-
+  
     try {
       setUploading(true);
-      const token = localStorage.getItem('token');
       const formData = new FormData();
-      formData.append('file', fileToUpload);
-      
-      const response = await axios.post('/api/upload', formData, {
+      formData.append(fileType, file);
+  
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_BASE_URL}/upload`, formData, {
         headers: {
-          Authorization: `Bearer ${token}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'multipart/form-data',
         },
       });
-
+  
       setBookForm(prev => ({
         ...prev,
-        [fileType === 'file' ? 'fileUrl' : 'coverUrl']: response.data.fileUrl,
+        [fileType === 'bookFile' ? 'fileUrl' : 'coverUrl']: response.data.fileUrl,
       }));
-      
+  
       toast({
         title: 'Success',
-        description: `${fileType === 'file' ? 'Book file' : 'Cover image'} uploaded successfully!`,
+        description: `${fileType === 'bookFile' ? 'Book file' : 'Cover image'} uploaded successfully!`,
       });
     } catch (error) {
       console.error(`Error uploading ${fileType}:`, error);
       toast({
         title: 'Error',
-        description: `Failed to upload ${fileType}. Please try again.`,
+        description: `Failed to upload ${fileType === 'bookFile' ? 'book file' : 'cover image'}`,
         variant: 'destructive',
       });
     } finally {
@@ -250,8 +237,11 @@ const AdminResources = () => {
       const token = localStorage.getItem('token');
       
       if (isEditingBook && currentBookId) {
-        await axios.put(`/api/books/${currentBookId}`, bookForm, {
-          headers: { Authorization: `Bearer ${token}` },
+        await axios.put(`${API_BASE_URL}/books/${currentBookId}`, bookForm, {
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
         });
         
         toast({
@@ -259,8 +249,11 @@ const AdminResources = () => {
           description: 'Book updated successfully!',
         });
       } else {
-        await axios.post('/api/books', bookForm, {
-          headers: { Authorization: `Bearer ${token}` },
+        await axios.post(`${API_BASE_URL}/books`, bookForm, {
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
         });
         
         toast({
@@ -269,7 +262,6 @@ const AdminResources = () => {
         });
       }
       
-      // Reset form and fetch updated list
       resetBookForm();
       fetchBooks();
     } catch (error) {
@@ -289,8 +281,11 @@ const AdminResources = () => {
       const token = localStorage.getItem('token');
       
       if (isEditingVerse && currentVerseId) {
-        await axios.put(`/api/verses/${currentVerseId}`, verseForm, {
-          headers: { Authorization: `Bearer ${token}` },
+        await axios.put(`${API_BASE_URL}/verses/${currentVerseId}`, verseForm, {
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
         });
         
         toast({
@@ -298,8 +293,11 @@ const AdminResources = () => {
           description: 'Bible verse updated successfully!',
         });
       } else {
-        await axios.post('/api/verses', verseForm, {
-          headers: { Authorization: `Bearer ${token}` },
+        await axios.post(`${API_BASE_URL}/verses`, verseForm, {
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
         });
         
         toast({
@@ -308,7 +306,6 @@ const AdminResources = () => {
         });
       }
       
-      // Reset form and fetch updated list
       resetVerseForm();
       fetchVerses();
     } catch (error) {
@@ -356,12 +353,12 @@ const AdminResources = () => {
       const token = localStorage.getItem('token');
       
       if (resourceType === 'book') {
-        await axios.delete(`/api/books/${resourceToDelete}`, {
+        await axios.delete(`${API_BASE_URL}/books/${resourceToDelete}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         fetchBooks();
       } else {
-        await axios.delete(`/api/verses/${resourceToDelete}`, {
+        await axios.delete(`${API_BASE_URL}/verses/${resourceToDelete}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         fetchVerses();
@@ -426,15 +423,19 @@ const AdminResources = () => {
           <h1 className="text-2xl font-serif font-bold">Manage Resources</h1>
         </div>
 
-        <Tabs defaultValue="books" onValueChange={(value) => setActiveTab(value)}>
+        <Tabs defaultValue="books" onValueChange={(value) => {
+          setActiveTab(value);
+          // Reset the inner tabs when switching between books/verses
+          setBooksTab('list');
+          setVersesTab('list');
+        }}>
           <TabsList className="mb-6">
             <TabsTrigger value="books">Books</TabsTrigger>
             <TabsTrigger value="verses">Bible Verses</TabsTrigger>
           </TabsList>
 
-          {/* Books Tab */}
           <TabsContent value="books">
-            <Tabs defaultValue="list">
+          <Tabs value={booksTab} onValueChange={setBooksTab}>
               <TabsList className="mb-6">
                 <TabsTrigger value="list">All Books</TabsTrigger>
                 <TabsTrigger value="create">{isEditingBook ? 'Edit Book' : 'Add New Book'}</TabsTrigger>
@@ -443,10 +444,15 @@ const AdminResources = () => {
               <TabsContent value="list">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-medium">Digital Books</h2>
-                  <Button onClick={() => resetBookForm()}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add New Book
-                  </Button>
+
+<Button onClick={() => {
+  resetBookForm();
+  setBooksTab('create');
+}}>
+  <Plus className="h-4 w-4 mr-2" />
+  Add New Book
+</Button>
+
                 </div>
 
                 {loading ? (
@@ -649,21 +655,24 @@ const AdminResources = () => {
             </Tabs>
           </TabsContent>
 
-          {/* Bible Verses Tab */}
           <TabsContent value="verses">
-            <Tabs defaultValue="list">
+          <Tabs value={versesTab} onValueChange={setVersesTab}>
               <TabsList className="mb-6">
                 <TabsTrigger value="list">All Bible Verses</TabsTrigger>
                 <TabsTrigger value="create">{isEditingVerse ? 'Edit Verse' : 'Add New Verse'}</TabsTrigger>
-              </TabsList>
+              </TabsList>   
 
               <TabsContent value="list">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-medium">Bible Verses</h2>
-                  <Button onClick={() => resetVerseForm()}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add New Verse
-                  </Button>
+
+<Button onClick={() => {
+  resetVerseForm();
+  setVersesTab('create');
+}}>
+  <Plus className="h-4 w-4 mr-2" />
+  Add New Verse
+</Button>
                 </div>
 
                 {loading ? (
@@ -797,7 +806,6 @@ const AdminResources = () => {
         </Tabs>
       </main>
 
-      {/* Delete confirmation dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
