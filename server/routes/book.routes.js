@@ -43,6 +43,12 @@ router.post('/', auth, (req, res, next) => {
   uploadBookFiles(req, res, (err) => {
     if (err) {
       console.error('Upload error:', err);
+      if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+        return res.status(400).json({ 
+          success: false,
+          message: `Unexpected field: ${err.field}` 
+        });
+      }
       return res.status(400).json({ 
         success: false,
         message: err.message 
@@ -73,17 +79,36 @@ router.post('/', auth, (req, res, next) => {
       coverUrl: `/uploads/${coverImage.filename}`
     });
 
-    const savedBook = await newBook.save();
-    res.status(201).json(savedBook);
+    await newBook.save();
+    res.status(201).json(newBook);
   } catch (error) {
     console.error('Error creating book:', error);
-    // Clean up files if error occurs
-    if (req.files) {
-      if (req.files['bookFile']) fs.unlinkSync(req.files['bookFile'][0].path);
-      if (req.files['coverImage']) fs.unlinkSync(req.files['coverImage'][0].path);
-    }
     res.status(500).json({ message: 'Server error' });
   }
+});
+
+// Add a separate endpoint for individual file uploads
+router.post('/upload-file', auth, (req, res, next) => {
+  const upload = multer({ 
+    storage,
+    fileFilter: (req, file, cb) => {
+      if (file.fieldname === 'file') {
+        cb(null, true);
+      } else {
+        cb(new Error('Unexpected field'), false);
+      }
+    }
+  }).single('file');
+
+  upload(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ message: err.message });
+    }
+    if (!req.file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
+    res.json({ url: `/uploads/${req.file.filename}` });
+  });
 });
 
 // Update book

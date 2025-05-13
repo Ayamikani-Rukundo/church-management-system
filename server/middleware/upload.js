@@ -17,47 +17,24 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.]/g, '-');
-    cb(null, uniqueSuffix + '-' + sanitizedName);
+    const ext = path.extname(file.originalname);
+    cb(null, uniqueSuffix + ext);
   }
 });
 
-// File filter to validate file types
-const fileFilter = (req, file, cb) => {
-  if (file.fieldname === 'image' || file.fieldname === 'coverImage') {
-    // Accept images only
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only image files are allowed'), false);
-    }
-  } else if (file.fieldname === 'bookFile') {
-    // Accept PDFs only for books
-    if (file.mimetype === 'application/pdf') {
-      cb(null, true);
-    } else {
-      cb(new Error('Only PDF files are allowed'), false);
-    }
-  } else {
-    cb(new Error(`Unexpected field: ${file.fieldname}`), false);
-  }
-};
+// Create separate upload instances for different use cases
+const upload = multer({ storage });
 
-// Create upload instance with limits
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB
-    files: 2 // Maximum 2 files
-  }
-});
+// For single image uploads (gallery)
+export const uploadSingleImage = upload.single('image');
 
-// Export specific middleware functions
-export const uploadGalleryImage = upload.single('image');
+// For book files (PDF + cover image)
 export const uploadBookFiles = upload.fields([
   { name: 'bookFile', maxCount: 1 },
   { name: 'coverImage', maxCount: 1 }
 ]);
+
+// For general file uploads
+export const uploadFile = upload.single('file');
 
 export default upload;

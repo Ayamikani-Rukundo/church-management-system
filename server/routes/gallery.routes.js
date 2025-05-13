@@ -1,7 +1,7 @@
 import express from 'express';
 import Gallery from '../models/Gallery.js';
 import auth from '../middleware/auth.js';
-import { uploadSingle } from '../middleware/upload.js'; // Import the specific upload function
+import { uploadSingleImage } from '../middleware/upload.js'; // Changed import name
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -56,7 +56,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create gallery item
-router.post('/', auth, uploadSingle, async (req, res) => {
+router.post('/', auth, uploadSingleImage, async (req, res) => {
   try {
     const { title, description } = req.body;
     
@@ -85,10 +85,9 @@ router.post('/', auth, uploadSingle, async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
-
       
 // Update gallery item (with optional file upload)
-router.put('/:id', auth, uploadSingle, async (req, res) => {
+router.put('/:id', auth, uploadSingleImage, async (req, res) => {
   try {
     const { title, description } = req.body;
     

@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Pencil, Trash2, ArrowLeft, Plus, Upload, Book, BookText } from 'lucide-react';
+import { Pencil, Trash2, ArrowLeft, Plus, Book, BookText } from 'lucide-react';
 import axios from 'axios';
 import AdminHeader from '@/components/admin/AdminHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -44,7 +44,7 @@ const AdminResources = () => {
   const [books, setBooks] = useState<BookResource[]>([]);
   const [verses, setVerses] = useState<BibleVerse[]>([]);
   const [loading, setLoading] = useState(true);
-  
+
   const [bookForm, setBookForm] = useState({
     title: '',
     author: '',
@@ -52,13 +52,13 @@ const AdminResources = () => {
     fileUrl: '',
     coverUrl: ''
   });
-  
+
   const [verseForm, setVerseForm] = useState({
     reference: '',
     text: '',
     translation: 'NIV'
   });
-  
+
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedCover, setSelectedCover] = useState<File | null>(null);
   const [isEditingBook, setIsEditingBook] = useState(false);
@@ -69,8 +69,11 @@ const AdminResources = () => {
   const [resourceToDelete, setResourceToDelete] = useState<string | null>(null);
   const [resourceType, setResourceType] = useState<'book' | 'verse'>('book');
   const [uploading, setUploading] = useState(false);
-  const [booksTab, setBooksTab] = useState('list'); // 'list' or 'create'
-const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
+  const [booksTab, setBooksTab] = useState('list');
+  const [versesTab, setVersesTab] = useState('list');
+
+  const bookFileInputRef = useRef<HTMLInputElement>(null);
+  const coverImageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -98,7 +101,7 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
       const response = await axios.get(`${API_BASE_URL}/books`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      
+
       if (Array.isArray(response.data)) {
         setBooks(response.data);
       } else {
@@ -124,7 +127,7 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
       const response = await axios.get(`${API_BASE_URL}/verses`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      
+
       if (Array.isArray(response.data)) {
         setVerses(response.data);
       } else {
@@ -164,12 +167,13 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
     });
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'file' | 'cover') => {
-    if (e.target.files && e.target.files.length > 0) {
-      if (type === 'file') {
-        setSelectedFile(e.target.files[0]);
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'bookFile' | 'coverImage') => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      if (type === 'bookFile') {
+        setSelectedFile(files[0]);
       } else {
-        setSelectedCover(e.target.files[0]);
+        setSelectedCover(files[0]);
       }
     }
   };
@@ -190,10 +194,12 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
     try {
       setUploading(true);
       const formData = new FormData();
-      formData.append(fileType, file);
+      
+      // Use the correct field name for the endpoint
+      formData.append('file', file);
   
       const token = localStorage.getItem('token');
-      const response = await axios.post(`${API_BASE_URL}/upload`, formData, {
+      const response = await axios.post(`${API_BASE_URL}/books/upload-file`, formData, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'multipart/form-data',
@@ -202,7 +208,7 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
   
       setBookForm(prev => ({
         ...prev,
-        [fileType === 'bookFile' ? 'fileUrl' : 'coverUrl']: response.data.fileUrl,
+        [fileType === 'bookFile' ? 'fileUrl' : 'coverUrl']: response.data.url,
       }));
   
       toast({
@@ -220,7 +226,7 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
       setUploading(false);
     }
   };
-
+  
   const handleBookSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -264,6 +270,7 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
       
       resetBookForm();
       fetchBooks();
+      setBooksTab('list');
     } catch (error) {
       console.error('Error saving book:', error);
       toast({
@@ -298,7 +305,7 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json'
           },
-        });
+        });        
         
         toast({
           title: 'Success',
@@ -308,6 +315,7 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
       
       resetVerseForm();
       fetchVerses();
+      setVersesTab('list');
     } catch (error) {
       console.error('Error saving verse:', error);
       toast({
@@ -328,6 +336,7 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
     });
     setIsEditingBook(true);
     setCurrentBookId(book._id);
+    setBooksTab('create');
   };
 
   const handleEditVerse = (verse: BibleVerse) => {
@@ -338,6 +347,7 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
     });
     setIsEditingVerse(true);
     setCurrentVerseId(verse._id);
+    setVersesTab('create');
   };
 
   const openDeleteDialog = (id: string, type: 'book' | 'verse') => {
@@ -425,7 +435,6 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
 
         <Tabs defaultValue="books" onValueChange={(value) => {
           setActiveTab(value);
-          // Reset the inner tabs when switching between books/verses
           setBooksTab('list');
           setVersesTab('list');
         }}>
@@ -435,7 +444,7 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
           </TabsList>
 
           <TabsContent value="books">
-          <Tabs value={booksTab} onValueChange={setBooksTab}>
+            <Tabs value={booksTab} onValueChange={setBooksTab}>
               <TabsList className="mb-6">
                 <TabsTrigger value="list">All Books</TabsTrigger>
                 <TabsTrigger value="create">{isEditingBook ? 'Edit Book' : 'Add New Book'}</TabsTrigger>
@@ -444,15 +453,13 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
               <TabsContent value="list">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-medium">Digital Books</h2>
-
-<Button onClick={() => {
-  resetBookForm();
-  setBooksTab('create');
-}}>
-  <Plus className="h-4 w-4 mr-2" />
-  Add New Book
-</Button>
-
+                  <Button onClick={() => {
+                    resetBookForm();
+                    setBooksTab('create');
+                  }}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add New Book
+                  </Button>
                 </div>
 
                 {loading ? (
@@ -588,20 +595,34 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
                           </div>
                         )}
                         <div className="flex gap-2">
-                          <Input
+                          <input
                             id="bookFile"
                             type="file"
-                            onChange={(e) => handleFileChange(e, 'file')}
+                            ref={bookFileInputRef}
+                            onChange={(e) => handleFileChange(e, 'bookFile')}
                             accept=".pdf"
+                            className="hidden"
                           />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => bookFileInputRef.current?.click()}
+                          >
+                            Select File
+                          </Button>
                           <Button 
                             type="button" 
-                            onClick={() => handleFileUpload('file')} 
+                            onClick={() => handleFileUpload('bookFile')} 
                             disabled={!selectedFile || uploading}
                           >
                             {uploading ? 'Uploading...' : 'Upload'}
                           </Button>
                         </div>
+                        {selectedFile && (
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Selected: {selectedFile.name}
+                          </p>
+                        )}
                       </div>
                       
                       <div>
@@ -618,33 +639,48 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
                           </div>
                         )}
                         <div className="flex gap-2">
-                          <Input
+                          <input
                             id="coverImage"
                             type="file"
-                            onChange={(e) => handleFileChange(e, 'cover')}
+                            ref={coverImageInputRef}
+                            onChange={(e) => handleFileChange(e, 'coverImage')}
                             accept="image/*"
+                            className="hidden"
                           />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => coverImageInputRef.current?.click()}
+                          >
+                            Select Image
+                          </Button>
                           <Button 
                             type="button" 
-                            onClick={() => handleFileUpload('cover')} 
+                            onClick={() => handleFileUpload('coverImage')} 
                             disabled={!selectedCover || uploading}
                           >
                             {uploading ? 'Uploading...' : 'Upload'}
                           </Button>
                         </div>
+                        {selectedCover && (
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Selected: {selectedCover.name}
+                          </p>
+                        )}
                       </div>
                       
                       <div className="flex justify-end space-x-2">
-                        {isEditingBook && (
-                          <Button 
-                            type="button" 
-                            variant="outline"
-                            onClick={resetBookForm}
-                          >
-                            Cancel
-                          </Button>
-                        )}
-                        <Button type="submit">
+                        <Button 
+                          type="button" 
+                          variant="outline"
+                          onClick={() => {
+                            resetBookForm();
+                            setBooksTab('list');
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                        <Button type="submit" disabled={uploading}>
                           {isEditingBook ? 'Update' : 'Add Book'}
                         </Button>
                       </div>
@@ -656,7 +692,7 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
           </TabsContent>
 
           <TabsContent value="verses">
-          <Tabs value={versesTab} onValueChange={setVersesTab}>
+            <Tabs value={versesTab} onValueChange={setVersesTab}>
               <TabsList className="mb-6">
                 <TabsTrigger value="list">All Bible Verses</TabsTrigger>
                 <TabsTrigger value="create">{isEditingVerse ? 'Edit Verse' : 'Add New Verse'}</TabsTrigger>
@@ -665,14 +701,13 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
               <TabsContent value="list">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-medium">Bible Verses</h2>
-
-<Button onClick={() => {
-  resetVerseForm();
-  setVersesTab('create');
-}}>
-  <Plus className="h-4 w-4 mr-2" />
-  Add New Verse
-</Button>
+                  <Button onClick={() => {
+                    resetVerseForm();
+                    setVersesTab('create');
+                  }}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add New Verse
+                  </Button>
                 </div>
 
                 {loading ? (
@@ -784,15 +819,16 @@ const [versesTab, setVersesTab] = useState('list'); // 'list' or 'create'
                       </div>
                       
                       <div className="flex justify-end space-x-2">
-                        {isEditingVerse && (
-                          <Button 
-                            type="button" 
-                            variant="outline"
-                            onClick={resetVerseForm}
-                          >
-                            Cancel
-                          </Button>
-                        )}
+                        <Button 
+                          type="button" 
+                          variant="outline"
+                          onClick={() => {
+                            resetVerseForm();
+                            setVersesTab('list');
+                          }}
+                        >
+                          Cancel
+                        </Button>
                         <Button type="submit">
                           {isEditingVerse ? 'Update' : 'Add Verse'}
                         </Button>
