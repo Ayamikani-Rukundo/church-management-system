@@ -107,40 +107,93 @@ const AdminGallery = () => {
     }
   };
 
-  const handleUpload = async () => {
-    if (!selectedFile) {
-      toast({ title: 'Error', description: 'No file selected', variant: 'destructive' });
-      return;
-    }
-  
-    try {
-      setUploading(true);
-      const formData = new FormData();
-      formData.append('image', selectedFile);
+ // Update the file upload handler:
+const handleFileUpload = async (type: 'book' | 'cover') => {
+  const fileInput = type === 'book' ? bookFileInputRef.current : coverImageInputRef.current;
+  const file = fileInput?.files?.[0];
 
-      const response = await axios.post(
-        `${API_BASE_URL}/api/upload`,
-        formData,
-        getAuthHeaders()
-      );
+  if (!file) {
+    toast({
+      title: 'Error',
+      description: `Please select a ${type === 'book' ? 'book file' : 'cover image'}`,
+      variant: 'destructive'
+    });
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', file); // Field name must match backend
+
+  try {
+    setUploading(true);
+    const response = await axios.post(`${API_BASE_URL}/books/upload-file`, formData, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        'Content-Type': 'multipart/form-data'
+      }
+    });
+
+    setBookForm(prev => ({
+      ...prev,
+      [type === 'book' ? 'fileUrl' : 'coverImage']: response.data.url
+    }));
+
+    toast({
+      title: 'Success',
+      description: `${type === 'book' ? 'Book file' : 'Cover image'} uploaded!`
+    });
+  } catch (error) {
+    console.error(`Upload error:`, error);
+    toast({
+      title: 'Upload Failed',
+      description: error.response?.data?.message || 'Failed to upload file',
+      variant: 'destructive'
+    });
+  } finally {
+    setUploading(false);
+  }
+};
+
+// Update verse submission:
+const handleVerseSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
   
-      setFormData(prev => ({
-        ...prev,
-        imageUrl: response.data.fileUrl
-      }));
-      
-      toast({ title: 'Success', description: 'Image uploaded successfully!' });
-    } catch (error) {
-      console.error('Upload failed:', error);
-      toast({
-        title: 'Upload Error',
-        description: error.response?.data?.message || 'Failed to upload image',
-        variant: 'destructive'
-      });
-    } finally {
-      setUploading(false);
-    }
-  };
+  try {
+    // Parse reference into book/chapter/verse
+    const [book, chapterVerse] = verseForm.reference.split(' ');
+    const [chapter, verse] = chapterVerse.split(':');
+
+    const payload = {
+      book,
+      chapter,
+      verse,
+      text: verseForm.text,
+      translation: verseForm.translation
+    };
+
+    const url = isEditingVerse && currentVerseId 
+      ? `${API_BASE_URL}/verses/${currentVerseId}`
+      : `${API_BASE_URL}/verses`;
+
+    await axios[isEditingVerse ? 'put' : 'post'](url, payload, {
+      headers: { 
+        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    toast({ title: 'Success', description: `Verse ${isEditingVerse ? 'updated' : 'added'}!` });
+    resetVerseForm();
+    fetchVerses();
+  } catch (error) {
+    console.error('Error saving verse:', error);
+    toast({
+      title: 'Error',
+      description: error.response?.data?.message || 'Failed to save verse',
+      variant: 'destructive'
+    });
+  }
+};
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -18,6 +18,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Upload, Loader2, File, Image } from 'lucide-react';
 
 const API_BASE_URL = 'http://localhost:5000/api';
 
@@ -27,7 +28,7 @@ interface BookResource {
   author: string;
   description: string;
   fileUrl: string;
-  coverUrl: string;
+  coverImage: string;
 }
 
 interface BibleVerse {
@@ -50,7 +51,9 @@ const AdminResources = () => {
     author: '',
     description: '',
     fileUrl: '',
-    coverUrl: ''
+    coverImage: '',
+    pendingFile: null as File | null, // Add this line
+    pendingCover: null as File | null // Add for cover image too
   });
 
   const [verseForm, setVerseForm] = useState({
@@ -59,8 +62,6 @@ const AdminResources = () => {
     translation: 'NIV'
   });
 
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [selectedCover, setSelectedCover] = useState<File | null>(null);
   const [isEditingBook, setIsEditingBook] = useState(false);
   const [isEditingVerse, setIsEditingVerse] = useState(false);
   const [currentBookId, setCurrentBookId] = useState<string | null>(null);
@@ -68,7 +69,9 @@ const AdminResources = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [resourceToDelete, setResourceToDelete] = useState<string | null>(null);
   const [resourceType, setResourceType] = useState<'book' | 'verse'>('book');
-  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [booksTab, setBooksTab] = useState('list');
   const [versesTab, setVersesTab] = useState('list');
 
@@ -94,31 +97,32 @@ const AdminResources = () => {
     }
   }, [navigate, toast, activeTab]);
 
-  const fetchBooks = async () => {
-    try {
-      setLoading(true);
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_BASE_URL}/books`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+ const fetchBooks = async () => {
+  try {
+    setLoading(true);
+    const token = localStorage.getItem('token');
+   const response = await axios.get(`${API_BASE_URL}/books`, {
+  headers: { Authorization: `Bearer ${token}` },
+});
 
-      if (Array.isArray(response.data)) {
-        setBooks(response.data);
-      } else {
-        setBooks([]);
-        console.error('Unexpected response format:', response.data);
-      }
-    } catch (error) {
-      console.error('Error fetching books:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load books. Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+    // Handle both response formats for backward compatibility
+    const booksData = Array.isArray(response.data) 
+      ? response.data 
+      : response.data.data || [];
+    
+    setBooks(booksData);
+  } catch (error) {
+    console.error('Error fetching books:', error);
+    toast({
+      title: 'Error',
+      description: 'Failed to load books. Please try again.',
+      variant: 'destructive',
+    });
+    setBooks([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const fetchVerses = async () => {
     try {
@@ -167,161 +171,176 @@ const AdminResources = () => {
     });
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'bookFile' | 'coverImage') => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      if (type === 'bookFile') {
-        setSelectedFile(files[0]);
-      } else {
-        setSelectedCover(files[0]);
-      }
-    }
-  };
-
-  const handleFileUpload = async (fileType: 'bookFile' | 'coverImage') => {
-    const fileInput = fileType === 'bookFile' ? bookFileInputRef.current : coverImageInputRef.current;
+  const handleFileUpload = async (type: 'book' | 'cover') => {
+    const fileInput = type === 'book' ? bookFileInputRef.current : coverImageInputRef.current;
     const file = fileInput?.files?.[0];
-  
+
     if (!file) {
       toast({
         title: 'Error',
-        description: `Please select a ${fileType === 'bookFile' ? 'book file' : 'cover image'}`,
-        variant: 'destructive',
+        description: 'Please select a file first',
+        variant: 'destructive'
       });
       return;
     }
-  
-    try {
-      setUploading(true);
-      const formData = new FormData();
-      
-      // Use the correct field name for the endpoint
-      formData.append('file', file);
-  
-      const token = localStorage.getItem('token');
-      const response = await axios.post(`${API_BASE_URL}/books/upload-file`, formData, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
-        },
+
+    // Validate file type
+    const allowedTypes = type === 'book' 
+      ? ['application/pdf'] 
+      : ['image/jpeg', 'image/png'];
+    
+    if (!allowedTypes.includes(file.type)) {
+      toast({
+        title: 'Invalid File',
+        description: type === 'book' 
+          ? 'Only PDF files are allowed for books' 
+          : 'Only JPG and PNG images are allowed for covers',
+        variant: 'destructive'
       });
-  
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      setIsUploading(true);
+      setUploadProgress(0);
+
+      const res = await axios.post(`${API_BASE_URL}/books/upload-file`, formData, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'multipart/form-data'
+        },
+        onUploadProgress: (progressEvent) => {
+          const percent = Math.round(
+            (progressEvent.loaded * 100) / (progressEvent.total || 100)
+          );
+          setUploadProgress(percent);
+        }
+      });
+
       setBookForm(prev => ({
         ...prev,
-        [fileType === 'bookFile' ? 'fileUrl' : 'coverUrl']: response.data.url,
+        [type === 'book' ? 'fileUrl' : 'coverImage']: res.data.url
       }));
-  
+
       toast({
         title: 'Success',
-        description: `${fileType === 'bookFile' ? 'Book file' : 'Cover image'} uploaded successfully!`,
+        description: `${type === 'book' ? 'Book file' : 'Cover image'} uploaded!`,
       });
+
     } catch (error) {
-      console.error(`Error uploading ${fileType}:`, error);
       toast({
-        title: 'Error',
-        description: `Failed to upload ${fileType === 'bookFile' ? 'book file' : 'cover image'}`,
-        variant: 'destructive',
+        title: 'Upload Failed',
+        description: error.response?.data?.message || 'Failed to upload file',
+        variant: 'destructive'
       });
     } finally {
-      setUploading(false);
-    }
-  };
-  
-  const handleBookSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!bookForm.fileUrl || !bookForm.coverUrl) {
-      toast({
-        title: 'Error',
-        description: 'Please upload both a book file and a cover image.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    
-    try {
-      const token = localStorage.getItem('token');
-      
-      if (isEditingBook && currentBookId) {
-        await axios.put(`${API_BASE_URL}/books/${currentBookId}`, bookForm, {
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-        });
-        
-        toast({
-          title: 'Success',
-          description: 'Book updated successfully!',
-        });
-      } else {
-        await axios.post(`${API_BASE_URL}/books`, bookForm, {
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-        });
-        
-        toast({
-          title: 'Success',
-          description: 'Book added successfully!',
-        });
-      }
-      
-      resetBookForm();
-      fetchBooks();
-      setBooksTab('list');
-    } catch (error) {
-      console.error('Error saving book:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to save book. Please try again.',
-        variant: 'destructive',
-      });
+      setIsUploading(false);
+      setUploadProgress(0);
     }
   };
 
+  const handleBookSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+
+  // Only show error if either one of the files is missing
+  if (!bookForm.fileUrl?.trim() || !bookForm.coverImage?.trim()) {
+    toast({
+      title: 'Required',
+      description: 'Please upload both a book file and cover image.',
+      variant: 'destructive',
+    });
+    return;
+  }
+
+  try {
+    setIsSubmitting(true);
+
+    const endpoint = isEditingBook && currentBookId
+      ? `http://localhost:5000/api/books/${currentBookId}`
+      : `http://localhost:5000/api/books`;
+
+    const method = isEditingBook ? 'put' : 'post';
+
+    const bookData = {
+      title: bookForm.title,
+      author: bookForm.author,
+      description: bookForm.description,
+      fileUrl: bookForm.fileUrl,
+      coverImage: bookForm.coverImage,
+      category: bookForm.category || 'general', // Default category
+    };
+
+    const response = await axios({
+      method,
+      url: endpoint,
+      data: bookData,
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    toast({
+      title: 'Success',
+      description: `Book ${isEditingBook ? 'updated' : 'added'} successfully!`,
+    });
+
+    resetBookForm();
+    fetchBooks();
+    setBooksTab('list');
+  } catch (error: any) {
+    console.error('Error saving book:', error);
+    toast({
+      title: 'Error',
+      description: error.response?.data?.message || 'Failed to save book.',
+      variant: 'destructive',
+    });
+  } finally {
+    setIsSubmitting(false);
+  }
+};
+
+
   const handleVerseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     try {
-      const token = localStorage.getItem('token');
-      
-      if (isEditingVerse && currentVerseId) {
-        await axios.put(`${API_BASE_URL}/verses/${currentVerseId}`, verseForm, {
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-        });
-        
-        toast({
-          title: 'Success',
-          description: 'Bible verse updated successfully!',
-        });
-      } else {
-        await axios.post(`${API_BASE_URL}/verses`, verseForm, {
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-        });        
-        
-        toast({
-          title: 'Success',
-          description: 'Bible verse added successfully!',
-        });
-      }
+      const endpoint = isEditingVerse && currentVerseId
+        ? `${API_BASE_URL}/verses/${currentVerseId}`
+        : `${API_BASE_URL}/verses`;
+
+      const method = isEditingVerse ? 'put' : 'post';
+
+      const response = await axios({
+        method,
+        url: endpoint,
+        data: {
+          reference: verseForm.reference,
+          text: verseForm.text,
+          translation: verseForm.translation
+        },
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      toast({
+        title: 'Success',
+        description: `Verse ${isEditingVerse ? 'updated' : 'added'} successfully!`
+      });
       
       resetVerseForm();
       fetchVerses();
       setVersesTab('list');
+
     } catch (error) {
-      console.error('Error saving verse:', error);
       toast({
         title: 'Error',
-        description: 'Failed to save Bible verse. Please try again.',
-        variant: 'destructive',
+        description: error.response?.data?.message || 'Failed to save verse',
+        variant: 'destructive'
       });
     }
   };
@@ -332,7 +351,7 @@ const AdminResources = () => {
       author: book.author,
       description: book.description,
       fileUrl: book.fileUrl,
-      coverUrl: book.coverUrl,
+      coverImage: book.coverImage
     });
     setIsEditingBook(true);
     setCurrentBookId(book._id);
@@ -398,10 +417,10 @@ const AdminResources = () => {
       author: '',
       description: '',
       fileUrl: '',
-      coverUrl: '',
+      coverImage: '',
     });
-    setSelectedFile(null);
-    setSelectedCover(null);
+    if (bookFileInputRef.current) bookFileInputRef.current.value = '';
+    if (coverImageInputRef.current) coverImageInputRef.current.value = '';
     setIsEditingBook(false);
     setCurrentBookId(null);
   };
@@ -479,9 +498,12 @@ const AdminResources = () => {
                         <Card key={book._id} className="overflow-hidden">
                           <div className="h-48 overflow-hidden">
                             <img 
-                              src={book.coverUrl} 
+                              src={book.coverImage} 
                               alt={book.title}
                               className="w-full h-full object-cover"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = '/placeholder-cover.jpg';
+                              }}
                             />
                           </div>
                           <CardHeader className="pb-2">
@@ -574,7 +596,6 @@ const AdminResources = () => {
                           onChange={handleBookInputChange}
                           placeholder="Brief description of the book..."
                           rows={3}
-                          required
                         />
                       </div>
                       
@@ -582,91 +603,105 @@ const AdminResources = () => {
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           Book File (PDF)
                         </label>
-                        {bookForm.fileUrl && (
-                          <div className="mb-2 text-sm">
-                            <a 
-                              href={bookForm.fileUrl} 
-                              target="_blank" 
-                              rel="noopener noreferrer" 
-                              className="text-blue-600 hover:underline"
-                            >
-                              View uploaded file
-                            </a>
-                          </div>
-                        )}
-                        <div className="flex gap-2">
-                          <input
-                            id="bookFile"
-                            type="file"
-                            ref={bookFileInputRef}
-                            onChange={(e) => handleFileChange(e, 'bookFile')}
-                            accept=".pdf"
-                            className="hidden"
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => bookFileInputRef.current?.click()}
-                          >
-                            Select File
-                          </Button>
-                          <Button 
-                            type="button" 
-                            onClick={() => handleFileUpload('bookFile')} 
-                            disabled={!selectedFile || uploading}
-                          >
-                            {uploading ? 'Uploading...' : 'Upload'}
-                          </Button>
-                        </div>
-                        {selectedFile && (
-                          <p className="text-sm text-muted-foreground mt-1">
-                            Selected: {selectedFile.name}
-                          </p>
-                        )}
+  <div className="flex items-center gap-2">
+  <input
+    type="file"
+    ref={bookFileInputRef}
+    accept=".pdf"
+    className="hidden"
+    onChange={(e) => {
+      // Just store the file, don't upload yet
+      if (e.target.files?.[0]) {
+        setBookForm(prev => ({
+          ...prev,
+          pendingFile: e.target.files?.[0] // Store the file object
+        }));
+      }
+    }}
+  />
+  
+  <Button
+    variant="outline"
+    onClick={() => bookFileInputRef.current?.click()}
+    disabled={isUploading}
+  >
+    {bookForm.fileUrl ? 'Change PDF' : 'Select PDF'}
+  </Button>
+
+  {/* Upload button appears only after file selection */}
+  {bookForm.pendingFile && !bookForm.fileUrl && (
+    <Button
+      onClick={() => handleFileUpload('book')}
+      disabled={isUploading}
+    >
+      {isUploading ? (
+        <>
+          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+          {uploadProgress}%
+        </>
+      ) : 'Upload PDF'}
+    </Button>
+  )}
+
+  {/* Success indicator */}
+  {bookForm.fileUrl && !isUploading && (
+    <div className="flex items-center text-sm text-green-600">
+      <File className="h-4 w-4 mr-1" />
+      <span>PDF Ready</span>
+    </div>
+  )}
+</div>
                       </div>
                       
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           Cover Image
                         </label>
-                        {bookForm.coverUrl && (
+                        {bookForm.coverImage && (
                           <div className="mb-2">
                             <img 
-                              src={bookForm.coverUrl} 
+                              src={bookForm.coverImage} 
                               alt="Cover Preview" 
                               className="h-40 object-cover rounded-md"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = '/placeholder-cover.jpg';
+                              }}
                             />
                           </div>
                         )}
-                        <div className="flex gap-2">
+                        <div className="flex items-center gap-2">
                           <input
-                            id="coverImage"
                             type="file"
                             ref={coverImageInputRef}
-                            onChange={(e) => handleFileChange(e, 'coverImage')}
                             accept="image/*"
                             className="hidden"
                           />
                           <Button
-                            type="button"
                             variant="outline"
                             onClick={() => coverImageInputRef.current?.click()}
                           >
-                            Select Image
+                            {bookForm.coverImage ? 'Change Image' : 'Select Image'}
                           </Button>
-                          <Button 
-                            type="button" 
-                            onClick={() => handleFileUpload('coverImage')} 
-                            disabled={!selectedCover || uploading}
-                          >
-                            {uploading ? 'Uploading...' : 'Upload'}
-                          </Button>
+                          {bookForm.coverImage ? (
+                            <div className="flex items-center text-sm text-green-600">
+                              <Image className="h-4 w-4 mr-1" />
+                              <span>Image Uploaded</span>
+                            </div>
+                          ) : (
+                            <Button
+                              type="button"
+                              onClick={() => handleFileUpload('cover')}
+                              disabled={!coverImageInputRef.current?.files?.length || isUploading}
+                            >
+                              {isUploading ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  {uploadProgress}%
+                                </>
+                              ) : 'Upload'}
+                            </Button>
+                          )}
                         </div>
-                        {selectedCover && (
-                          <p className="text-sm text-muted-foreground mt-1">
-                            Selected: {selectedCover.name}
-                          </p>
-                        )}
                       </div>
                       
                       <div className="flex justify-end space-x-2">
@@ -680,8 +715,16 @@ const AdminResources = () => {
                         >
                           Cancel
                         </Button>
-                        <Button type="submit" disabled={uploading}>
-                          {isEditingBook ? 'Update' : 'Add Book'}
+                        <Button 
+                          type="submit" 
+                          disabled={isSubmitting || !bookForm.fileUrl || !bookForm.coverImage}
+                        >
+                          {isSubmitting ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Processing...
+                            </>
+                          ) : isEditingBook ? 'Update Book' : 'Add Book'}
                         </Button>
                       </div>
                     </form>
@@ -829,8 +872,13 @@ const AdminResources = () => {
                         >
                           Cancel
                         </Button>
-                        <Button type="submit">
-                          {isEditingVerse ? 'Update' : 'Add Verse'}
+                        <Button type="submit" disabled={isSubmitting}>
+                          {isSubmitting ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Processing...
+                            </>
+                          ) : isEditingVerse ? 'Update Verse' : 'Add Verse'}
                         </Button>
                       </div>
                     </form>

@@ -13,7 +13,7 @@ interface Book {
   title: string;
   author: string;
   description: string;
-  imageUrl: string;
+  coverImage: string;
   fileUrl?: string;
 }
 
@@ -45,14 +45,19 @@ const ResourcesPage = () => {
         const response = await axios.get('http://localhost:5000/api/books');
         console.log('Books API response:', response.data);
         
-        // Ensure response.data is an array before setting state
-        if (Array.isArray(response.data)) {
-          setBooks(response.data);
-        } else {
-          console.error('Expected books array but got:', response.data);
-          setError(prev => ({ ...prev, books: 'Received invalid data format from server.' }));
-          setBooks([]); // Initialize with empty array to avoid map errors
-        }
+  const data = response.data;
+
+if (Array.isArray(data.data)) {
+  setBooks(data.data);
+} else if (Array.isArray(data.items)) {
+  setBooks(data.items);
+} else if (Array.isArray(data)) {
+  setBooks(data);
+} else {
+  setError(prev => ({ ...prev, books: 'Received invalid data format from server.' }));
+  setBooks([]);
+}
+
         setLoading(prev => ({ ...prev, books: false }));
       } catch (err) {
         console.error('Error fetching books:', err);
@@ -122,10 +127,11 @@ const ResourcesPage = () => {
                       <Card key={book._id} className="overflow-hidden hover:shadow-lg transition-shadow duration-300">
                         <div className="h-48 overflow-hidden">
                           <img
-                            src={book.imageUrl || '/placeholder.svg'}
-                            alt={book.title}
-                            className="w-full h-full object-cover"
+                              src={book.coverImage} alt={book.title} style={{ width: '150px' }}
+                              alt={book.title}
+                              style={{ height: '100%', objectFit: 'cover' }}
                           />
+
                         </div>
                         <CardHeader className="pb-2">
                           <CardTitle className="font-serif">{book.title}</CardTitle>

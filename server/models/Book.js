@@ -6,7 +6,8 @@ const bookSchema = new mongoose.Schema({
   description: { type: String },
   fileUrl: { type: String, required: true },
   coverImage: { type: String },
-  category: { type: String, required: true },
+  // In your Book model
+  category: { type: String, required: false },
   createdAt: { type: Date, default: Date.now }
 });
 

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Tester</title>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <style>
+        body { font-family: Arial; max-width: 600px; margin: 0 auto; padding: 20px; }
+        .box { border: 2px dashed #ccc; padding: 20px; margin: 20px 0; }
+        button { padding: 10px 15px; background: #4CAF50; color: white; border: none; cursor: pointer; }
+        pre { background: #f4f4f4; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>API Test Page</h1>
+    
+    <!-- File Upload Test -->
+    <div class="box">
+        <h2>1. Test Book File Upload</h2>
+        <input type="file" id="fileInput">
+        <button onclick="uploadFile()">Upload File</button>
+        <div id="fileResult"></div>
+    </div>
+
+    <!-- Verse Creation Test -->
+    <div class="box">
+        <h2>2. Test Verse Creation</h2>
+        <input type="text" id="verseRef" placeholder="Reference (e.g. John 3:16)" style="width:100%;padding:8px;margin:5px 0;">
+        <textarea id="verseText" placeholder="Verse text..." style="width:100%;padding:8px;margin:5px 0;height:100px;"></textarea>
+        <button onclick="createVerse()">Create Verse</button>
+        <div id="verseResult"></div>
+    </div>
+
+    <script>
+        // Get your token from localStorage (must be logged in first)
+        const token = localStorage.getItem('token');
+        if (!token) alert('Please login first and reload this page');
+
+        // 1. File Upload Function
+        async function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            if (!fileInput.files.length) return alert('Select a file first');
+            
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            try {
+                const res = await axios.post('http://localhost:5000/api/books/upload-file', formData, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'multipart/form-data'
+                    }
+                });
+                document.getElementById('fileResult').innerHTML = `<pre>${JSON.stringify(res.data, null, 2)}</pre>`;
+            } catch (err) {
+                document.getElementById('fileResult').innerHTML = `<pre style="color:red">ERROR: ${err.response?.data?.message || err.message}</pre>`;
+            }
+        }
+
+        // 2. Verse Creation Function
+        async function createVerse() {
+            const [book, chapterVerse] = document.getElementById('verseRef').value.split(' ');
+            const [chapter, verse] = chapterVerse.split(':');
+            const text = document.getElementById('verseText').value;
+
+            try {
+                const res = await axios.post('http://localhost:5000/api/verses', {
+                    book, chapter, verse, text, translation: 'NIV'
+                }, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                document.getElementById('verseResult').innerHTML = `<pre>${JSON.stringify(res.data, null, 2)}</pre>`;
+            } catch (err) {
+                document.getElementById('verseResult').innerHTML = `<pre style="color:red">ERROR: ${err.response?.data?.message || err.message}</pre>`;
+            }
+        }
+    </script>
+</body>
+</html>

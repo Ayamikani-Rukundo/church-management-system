@@ -30,32 +30,31 @@ router.get('/:id', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
-
 // Create verse
+
+// POST - Create Verse (EXACTLY like announcements.js)
 router.post('/', auth, async (req, res) => {
   try {
-    const { book, chapter, verse, text, translation } = req.body;
-    
-    // Validate required fields
-    if (!book || !chapter || !verse || !text) {
-      return res.status(400).json({ 
-        message: 'Book, chapter, verse, and text are required' 
-      });
-    }
+    // 1. Parse reference like announcement titles
+    const [book, chapterVerse] = req.body.reference.split(' ');
+    const [chapter, verse] = chapterVerse.split(':');
 
-    // Create new verse
+    // 2. Create new verse (same structure as announcements)
     const newVerse = new Verse({
       book,
       chapter: Number(chapter),
       verse: Number(verse),
-      text,
-      translation: translation || 'NIV'
+      reference: req.body.reference,
+      text: req.body.text,
+      translation: req.body.translation || 'NIV'
     });
 
-    const savedVerse = await newVerse.save();
-    res.status(201).json(savedVerse);
+    // 3. Save and respond (identical pattern)
+    await newVerse.save();
+    res.status(201).json(newVerse);
+
   } catch (error) {
-    console.error('Error creating verse:', error);
+    // 4. Error handling (copy from announcements.js)
     res.status(500).json({ 
       message: error.message || 'Server error' 
     });
